@@ -9,6 +9,39 @@ tg-watchbot 是一个轻量级 Python 服务，把 **Telegram 双向客服机器
 
 项目为单文件应用，适合个人服务器、NAT 小鸡、轻量 VPS 直接用 systemd 跑。
 
+<div align="center">
+  <h2>tg-watchbot</h2>
+  <p>Telegram 双向客服机器人 + Web/RSS 监控推送 + 可视化管理面板</p>
+  <p>双向对话 · 关键词监控 · 私聊广告拦截 · 多管理员 · 配置导入导出</p>
+  <p>
+    <a href="#ai-one-line-install">AI 一句话安装</a> ·
+    <a href="#docker-install">Docker 安装</a> ·
+    <a href="#manual-install">手动安装</a> ·
+    <a href="#systemd-install">systemd 部署</a> ·
+    <a href="#面板路由">面板路由</a> ·
+    <a href="#更新日志">更新日志</a>
+  </p>
+</div>
+
+<a id="ai-one-line-install"></a>
+## AI 一句话安装
+
+```bash
+bash -lc 'git clone https://github.com/GongyiChuren/tg-watchbot.git tg-watchbot && cd tg-watchbot && cp -n .env.example .env && cp -n config.example.yaml config.yaml && touch tg-watchbot.sqlite3 tg-watchbot.log && docker compose up -d --build'
+```
+
+说明：默认走 Docker（`restart: unless-stopped`，重启后自动拉起）。首次启动后打开 `http://127.0.0.1:8765`，在面板里填写 Token / 管理员 ID，保存后重启容器生效：
+
+```bash
+docker compose restart
+```
+
+### AI 一句话直接安装（非 Docker）
+
+```bash
+bash -lc 'git clone https://github.com/GongyiChuren/tg-watchbot.git tg-watchbot && cd tg-watchbot && python3 -m venv .venv && ./.venv/bin/pip install -U pip && ./.venv/bin/pip install -r requirements.txt && cp -n .env.example .env && cp -n config.example.yaml config.yaml && ./.venv/bin/python app.py'
+```
+
 ## 更新日志
 
 ### 2026-05-21 第二次更新
@@ -109,7 +142,33 @@ tg-watchbot 是一个轻量级 Python 服务，把 **Telegram 双向客服机器
 - 如果要把面板暴露到公网，建议使用 Cloudflare Access / 反代鉴权，并使用强密码。
 - Bot 只能给“已经主动私聊过 Bot 的用户”发消息，这是 Telegram Bot API 的限制。
 
+<a id="manual-install"></a>
 ## 快速开始（推荐使用systemd 部署）
+
+<a id="docker-install"></a>
+## Docker 安装（含自启）
+
+```bash
+git clone https://github.com/GongyiChuren/tg-watchbot.git tg-watchbot
+cd tg-watchbot
+cp .env.example .env
+cp config.example.yaml config.yaml
+touch tg-watchbot.sqlite3 tg-watchbot.log
+docker compose up -d --build
+```
+
+查看状态与日志：
+
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+修改配置后重启：
+
+```bash
+docker compose restart
+```
 
 ```bash
 git clone https://github.com/GongyiChuren/tg-watchbot.git tg-watchbot
@@ -148,6 +207,7 @@ http://127.0.0.1:8765
 ./.venv/bin/python app.py --run-once
 ```
 
+<a id="systemd-install"></a>
 ## systemd 部署
 
 推荐部署到 `/opt/tg-watchbot`：
