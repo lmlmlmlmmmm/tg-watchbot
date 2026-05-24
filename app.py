@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import hashlib
+import hmac
 import html
 import logging
 import os
@@ -467,6 +469,7 @@ def group_monitors() -> list[dict[str, Any]]:
                 "keywords": keywords,
                 "exclude_keywords": exclude_keywords,
                 "notify_telegram": bool(row.get("notify_telegram", True)),
+                "notify_feishu": bool(row.get("notify_feishu", True)),
                 "ai_base_url": str(row.get("ai_base_url") or "").strip(),
                 "ai_api_key": str(row.get("ai_api_key") or "").strip(),
                 "ai_model": str(row.get("ai_model") or "gpt-4o-mini").strip(),
@@ -796,7 +799,9 @@ async def handle_group_keyword_message(message: Message, listen_source: str = "b
     hits = keyword_hits(text, monitor.get("keywords") or [])
     if not hits:
         return False
-    if not monitor.get("notify_telegram", True):
+    notify_tg = bool(monitor.get("notify_telegram", True))
+    notify_fs = bool(monitor.get("notify_feishu", True))
+    if not notify_tg and not notify_fs:
         return True
     fp = group_monitor_fingerprint(message, monitor, hits)
     allow, reason = group_monitor_allow_send(monitor, fp)
@@ -809,7 +814,11 @@ async def handle_group_keyword_message(message: Message, listen_source: str = "b
             reason,
         )
         return False
-    await admin_send(await summarize_group_message(message, monitor, hits))
+    await admin_send(
+        await summarize_group_message(message, monitor, hits),
+        notify_telegram=notify_tg,
+        notify_feishu=notify_fs,
+    )
     return True
 
 
@@ -1085,35 +1094,122 @@ def describe_sendpic_target(user_id: int) -> str:
     return f"{full_name} {username}".strip()
 
 
-async def admin_send(text: str) -> None:
-    if not bot or not all_admin_chat_ids():
-        logger.error("admin_send called before bot/admin init: %s", text)
-        return
-    for chat_id in all_admin_chat_ids():
-        try:
-            await bot.send_message(chat_id, text, disable_web_page_preview=False)
-        except Exception:
-            logger.exception("failed to send admin notification chat_id=%s", chat_id)
+# -----------------------------
+# 飞书自定义机器人推送
+# -----------------------------
+
+def feishu_webhook_url() -> str:
+    return (os.getenv("FEISHU_WEBHOOK_URL") or "").strip()
 
 
-async def admin_send_monitor(text: str, monitor_name: str) -> bool:
-    if not bot or not all_admin_chat_ids():
-        logger.error("admin_send_monitor called before bot/admin init: %s", text)
+def feishu_webhook_secret() -> str:
+    return (os.getenv("FEISHU_WEBHOOK_SECRET") or "").strip()
+
+
+def feishu_configured() -> bool:
+    return bool(feishu_webhook_url())
+
+
+def feishu_sign(secret: str, timestamp: int) -> str:
+    """飞书自定义机器人签名：HMAC-SHA256(key=timestamp\\nsecret, msg="") 再 base64。"""
+    string_to_sign = f"{timestamp}\n{secret}"
+    digest = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+async def feishu_send(text: str) -> bool:
+    """向飞书自定义机器人推送一条文本消息。仅当 webhook 配置存在时才会调用。"""
+    url = feishu_webhook_url()
+    if not url:
         return False
-    sent_any = False
-    for chat_id in all_admin_chat_ids():
+    timeout = int((config.get("http") or {}).get("timeout_seconds", 20))
+    # TG 默认 HTML parse_mode，文案中夹杂 &lt;/&gt;/<code> 等需要转回纯文本，飞书才不会显示成乱码
+    plain = re.sub(r"<[^>]+>", "", text or "")
+    plain = html.unescape(plain)
+    payload: dict[str, Any] = {
+        "msg_type": "text",
+        "content": {"text": plain},
+    }
+    secret = feishu_webhook_secret()
+    if secret:
+        ts = int(time.time())
+        payload["timestamp"] = str(ts)
+        payload["sign"] = feishu_sign(secret, ts)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+        if resp.status_code != 200:
+            logger.warning("feishu webhook http %s body=%s", resp.status_code, resp.text[:300])
+            return False
         try:
-            sent = await bot.send_message(chat_id, text, disable_web_page_preview=False)
-            settings = monitor_cleanup_settings()
-            record_monitor_message(
-                chat_id,
-                sent.message_id,
-                monitor_name,
-                int(settings["message_delete_after_minutes"]) * 60,
-            )
-            sent_any = True
+            data = resp.json()
         except Exception:
-            logger.exception("failed to send monitor notification chat_id=%s", chat_id)
+            logger.warning("feishu webhook non-json response: %s", resp.text[:300])
+            return False
+        # 成功返回示例：{"code":0,"data":{},"msg":"success"} 或 {"StatusCode":0,...}
+        code = data.get("code", data.get("StatusCode", 0))
+        if code not in (0, "0"):
+            logger.warning("feishu webhook returned non-zero code=%s msg=%s", code, data.get("msg") or data.get("StatusMessage"))
+            return False
+        return True
+    except Exception:
+        logger.exception("feishu_send failed")
+        return False
+
+
+async def admin_send(text: str, *, notify_telegram: bool = True, notify_feishu: bool = True) -> None:
+    """通用管理员通知出口：并行推送 Telegram 与飞书。
+
+    notify_telegram / notify_feishu 控制是否走对应通道，便于按监控项透传。
+    """
+    if notify_telegram:
+        if not bot or not all_admin_chat_ids():
+            logger.error("admin_send called before bot/admin init: %s", text)
+        else:
+            for chat_id in all_admin_chat_ids():
+                try:
+                    await bot.send_message(chat_id, text, disable_web_page_preview=False)
+                except Exception:
+                    logger.exception("failed to send admin notification chat_id=%s", chat_id)
+    if notify_feishu and feishu_configured():
+        try:
+            await feishu_send(text)
+        except Exception:
+            logger.exception("failed to send admin notification via feishu")
+
+
+async def admin_send_monitor(
+    text: str,
+    monitor_name: str,
+    *,
+    notify_telegram: bool = True,
+    notify_feishu: bool = True,
+) -> bool:
+    """监控通知出口：并行 TG/飞书，至少一条成功即视为 True。"""
+    sent_any = False
+    if notify_telegram:
+        if not bot or not all_admin_chat_ids():
+            logger.error("admin_send_monitor called before bot/admin init: %s", text)
+        else:
+            for chat_id in all_admin_chat_ids():
+                try:
+                    sent = await bot.send_message(chat_id, text, disable_web_page_preview=False)
+                    settings = monitor_cleanup_settings()
+                    record_monitor_message(
+                        chat_id,
+                        sent.message_id,
+                        monitor_name,
+                        int(settings["message_delete_after_minutes"]) * 60,
+                    )
+                    sent_any = True
+                except Exception:
+                    logger.exception("failed to send monitor notification chat_id=%s", chat_id)
+    if notify_feishu and feishu_configured():
+        try:
+            if await feishu_send(text):
+                sent_any = True
+        except Exception:
+            logger.exception("failed to send monitor notification via feishu monitor=%s", monitor_name)
     return sent_any
 
 
@@ -1720,6 +1816,7 @@ async def run_monitor(monitor: dict[str, Any]) -> int:
             if not event_not_sent(event_key, name, item.title, item.link):
                 continue
             notify_on_tg = bool(monitor.get("notify_telegram", True))
+            notify_on_feishu = bool(monitor.get("notify_feishu", True))
             if is_forum:
                 text = (
                     f"[新帖命中] {html_escape(name)}\n"
@@ -1741,11 +1838,17 @@ async def run_monitor(monitor: dict[str, Any]) -> int:
                     f"库存：{html_escape(item.stock or '-')}\n"
                     f"时间：{html_escape(now_iso())}"
                 )
+            # 记录历史时保留旧含义：pushed 指代是否走 Telegram；飞书通道作为补充
             record_monitor_event(name, item.title, item.link, reasons, notify_on_tg)
-            if not notify_on_tg:
+            if not notify_on_tg and not notify_on_feishu:
                 sent_count += 1
                 continue
-            if await admin_send_monitor(text, name):
+            if await admin_send_monitor(
+                text,
+                name,
+                notify_telegram=notify_on_tg,
+                notify_feishu=notify_on_feishu,
+            ):
                 sent_count += 1
         record_monitor_runtime(name, ok=True, duration_ms=int((time.time() - started) * 1000), sent_count=sent_count)
     except Exception as e:
@@ -1795,7 +1898,8 @@ async def cleanup_monitor_loop() -> None:
 
 
 async def flush_pending_inbox() -> None:
-    if not bot or not all_admin_chat_ids():
+    feishu_on = feishu_configured()
+    if not (bot and all_admin_chat_ids()) and not feishu_on:
         return
     rows = pending_inbox(50)
     if not rows:
@@ -1814,10 +1918,17 @@ async def flush_pending_inbox() -> None:
                 f"内容：{html_escape(row['text'] or '(非文本/媒体消息，原始媒体无法补发，仅保留记录)')}"
             )
             first_id = None
-            for chat_id in all_admin_chat_ids():
-                sent = await bot.send_message(chat_id, text)
-                save_message_map(chat_id, sent.message_id, int(row['user_id']), int(row['user_message_id']) if row['user_message_id'] else None)
-                first_id = first_id or sent.message_id
+            if bot and all_admin_chat_ids():
+                for chat_id in all_admin_chat_ids():
+                    sent = await bot.send_message(chat_id, text)
+                    save_message_map(chat_id, sent.message_id, int(row['user_id']), int(row['user_message_id']) if row['user_message_id'] else None)
+                    first_id = first_id or sent.message_id
+            if feishu_on:
+                # 飞书侧仅作通知，不参与 message_map 双向回复
+                try:
+                    await feishu_send(text)
+                except Exception:
+                    logger.exception("failed to forward inbox to feishu id=%s", row['id'])
             mark_inbox_forwarded(int(row['id']), first_id, None)
         except Exception as e:
             mark_inbox_error(int(row['id']), repr(e))
@@ -1942,6 +2053,8 @@ def env_values() -> dict[str, str]:
         "TG_API_ID": os.getenv("TG_API_ID", ""),
         "TG_API_HASH": os.getenv("TG_API_HASH", ""),
         "TG_API_SESSION": os.getenv("TG_API_SESSION", ""),
+        "FEISHU_WEBHOOK_URL": os.getenv("FEISHU_WEBHOOK_URL", ""),
+        "FEISHU_WEBHOOK_SECRET": os.getenv("FEISHU_WEBHOOK_SECRET", ""),
     }
 
 
@@ -1969,6 +2082,10 @@ def write_env_values(values: dict[str, str]) -> None:
         f"TG_API_ID={values.get('TG_API_ID','')}",
         f"TG_API_HASH={values.get('TG_API_HASH','')}",
         f"TG_API_SESSION={values.get('TG_API_SESSION','')}",
+        "",
+        "# 飞书自定义机器人 Webhook（可选）",
+        f"FEISHU_WEBHOOK_URL={values.get('FEISHU_WEBHOOK_URL','')}",
+        f"FEISHU_WEBHOOK_SECRET={values.get('FEISHU_WEBHOOK_SECRET','')}",
         "",
     ]
     ENV_PATH.write_text("\n".join(lines), encoding="utf-8")
@@ -2003,6 +2120,7 @@ def cfg_save(new_cfg: dict[str, Any]) -> None:
         gm.setdefault("keywords", [])
         gm.setdefault("exclude_keywords", [])
         gm.setdefault("notify_telegram", True)
+        gm.setdefault("notify_feishu", True)
         listen_source = str(gm.get("listen_source") or "bot").strip().lower() or "bot"
         if listen_source not in {"bot", "user_session"}:
             listen_source = "bot"
@@ -2140,6 +2258,7 @@ def monitor_from_form(
     price_change: bool,
     stock_change: bool,
     notify_telegram: bool = True,
+    notify_feishu: bool = True,
 ) -> dict[str, Any]:
     m: dict[str, Any] = {
         "name": name.strip(),
@@ -2148,6 +2267,7 @@ def monitor_from_form(
         "interval_seconds": max(int(interval_seconds or MIN_INTERVAL_SECONDS), MIN_INTERVAL_SECONDS),
         "keywords": parse_lines(keywords),
         "notify_telegram": notify_telegram,
+        "notify_feishu": notify_feishu,
         "notify_on": {
             "keyword_match": keyword_match,
             "new_item": new_item,
@@ -2289,7 +2409,8 @@ def monitor_form_html(m: dict[str, Any] | None = None, idx: int | None = None) -
 <label><input type=checkbox name=new_item {checked('new_item')}> 新条目</label>
 <label><input type=checkbox name=price_change {checked('price_change')}> 价格变化</label>
 <label><input type=checkbox name=stock_change {checked('stock_change')}> 库存变化</label>
-<label><input type=checkbox name=notify_telegram {'checked' if m.get('notify_telegram', True) else ''}> 推送 Telegram</label></div>
+<label><input type=checkbox name=notify_telegram {'checked' if m.get('notify_telegram', True) else ''}> 推送 Telegram</label>
+<label><input type=checkbox name=notify_feishu {'checked' if m.get('notify_feishu', True) else ''}> 推送飞书</label></div>
 <div class=form-actions><button class='btn primary' type=submit>保存</button> <a class=btn href='/'>取消</a></div></form>"""
 
 
@@ -2299,6 +2420,7 @@ def group_monitor_form_html(m: dict[str, Any] | None = None, idx: int | None = N
         "keywords": [],
         "exclude_keywords": [],
         "notify_telegram": True,
+        "notify_feishu": True,
         "summary_mode": "template",
         "ai_base_url": "",
         "ai_api_key": "",
@@ -2317,7 +2439,8 @@ def group_monitor_form_html(m: dict[str, Any] | None = None, idx: int | None = N
     exclude_keywords = "\n".join(m.get("exclude_keywords") or [])
     return f"""<form method=post action='{action}' class=card>{hidden}
 <div class=check-row><label><input type=checkbox name=enabled {'checked' if m.get('enabled', True) else ''}> 启用监听</label>
-<label><input type=checkbox name=notify_telegram {'checked' if m.get('notify_telegram', True) else ''}> 推送管理员</label></div>
+<label><input type=checkbox name=notify_telegram {'checked' if m.get('notify_telegram', True) else ''}> 推送管理员</label>
+<label><input type=checkbox name=notify_feishu {'checked' if m.get('notify_feishu', True) else ''}> 推送飞书</label></div>
 <div class=grid><div><label>监听名称</label><input name=name value='{html_escape(m.get('name',''))}' placeholder='例如：业务群关键词'></div>
 <div><label>群 chat_id</label><input name=chat_id value='{html_escape(m.get('chat_id',''))}' placeholder='例如 -1001234567890' required></div></div>
 <div class=grid><div><label>监听来源</label><select name=listen_source><option value=bot {'selected' if str(m.get('listen_source', 'bot')) == 'bot' else ''}>Bot</option><option value=user_session {'selected' if str(m.get('listen_source')) == 'user_session' else ''}>用户会话</option></select></div><div><label>来源说明</label><input value='Bot 需要被拉进群；用户会话适合 Bot 拉不进去的群' readonly></div></div>
@@ -2371,7 +2494,12 @@ def create_panel_app() -> FastAPI:
         statuses = list_monitor_runtime_status()
         rows = []
         for i, m in enumerate(cfg.get("monitors") or []):
-            tg = "TG" if m.get("notify_telegram", True) else "仅 Web"
+            channels = []
+            if m.get("notify_telegram", True):
+                channels.append("TG")
+            if m.get("notify_feishu", True):
+                channels.append("飞书")
+            tg = " + ".join(channels) if channels else "仅 Web"
             name = str(m.get("name", ""))
             st = statuses.get(name)
             st_badge = get_monitor_status_badge(st)
@@ -2401,7 +2529,12 @@ def create_panel_app() -> FastAPI:
             if not isinstance(gm, dict):
                 continue
             enabled = "启用" if gm.get("enabled", True) else "关闭"
-            notify = "推送 TG" if gm.get("notify_telegram", True) else "仅记录"
+            notify_parts = []
+            if gm.get("notify_telegram", True):
+                notify_parts.append("TG")
+            if gm.get("notify_feishu", True):
+                notify_parts.append("飞书")
+            notify = "推送 " + "+".join(notify_parts) if notify_parts else "仅记录"
             source = "Bot" if str(gm.get("listen_source") or "bot") == "bot" else "用户会话"
             kws = ", ".join([str(x) for x in (gm.get("keywords") or [])]) or "-"
             exs = ", ".join([str(x) for x in (gm.get("exclude_keywords") or [])]) or "-"
@@ -2458,6 +2591,7 @@ def create_panel_app() -> FastAPI:
                 "keywords": [],
                 "exclude_keywords": [],
                 "notify_telegram": True,
+                "notify_feishu": True,
                 "summary_mode": "template",
                 "ai_base_url": "",
                 "ai_api_key": "",
@@ -2487,6 +2621,7 @@ def create_panel_app() -> FastAPI:
         exclude_keywords: str,
         enabled: str | None,
         notify_telegram: str | None,
+        notify_feishu: str | None,
         listen_source: str,
         summary_mode: str,
         ai_base_url: str,
@@ -2521,6 +2656,7 @@ def create_panel_app() -> FastAPI:
                 "keywords": parse_lines(keywords),
                 "exclude_keywords": parse_lines(exclude_keywords),
                 "notify_telegram": bool(notify_telegram),
+                "notify_feishu": bool(notify_feishu),
                 "listen_source": parsed_listen_source,
                 "summary_mode": parsed_summary_mode,
                 "ai_base_url": ai_base_url.strip(),
@@ -2553,6 +2689,7 @@ def create_panel_app() -> FastAPI:
         exclude_keywords: str = Form(""),
         enabled: str | None = Form(None),
         notify_telegram: str | None = Form(None),
+        notify_feishu: str | None = Form(None),
         summary_mode: str = Form("template"),
         listen_source: str = Form("bot"),
         ai_base_url: str = Form(""),
@@ -2573,6 +2710,7 @@ def create_panel_app() -> FastAPI:
             exclude_keywords,
             enabled,
             notify_telegram,
+            notify_feishu,
             listen_source,
             summary_mode,
             ai_base_url,
@@ -2596,6 +2734,7 @@ def create_panel_app() -> FastAPI:
         exclude_keywords: str = Form(""),
         enabled: str | None = Form(None),
         notify_telegram: str | None = Form(None),
+        notify_feishu: str | None = Form(None),
         summary_mode: str = Form("template"),
         listen_source: str = Form("bot"),
         ai_base_url: str = Form(""),
@@ -2616,6 +2755,7 @@ def create_panel_app() -> FastAPI:
             exclude_keywords,
             enabled,
             notify_telegram,
+            notify_feishu,
             listen_source,
             summary_mode,
             ai_base_url,
@@ -2660,11 +2800,11 @@ def create_panel_app() -> FastAPI:
         sample = """NodeSeek|https://www.nodeseek.com/|免费鸡,优惠码,NAT
 Linux.do|https://linux.do|公益,codex,claude
 HostLoc|https://hostloc.com|VPS,补货,优惠"""
-        body = f"""<div class=card><h2>批量新增监控</h2><p class=muted>一行一个网站，格式：<code>名称|URL|关键词1,关键词2,关键词3</code>。</p><form method=post action='/monitor/bulk'><label>批量列表</label><textarea name=items style='min-height:260px' placeholder='{html_escape(sample)}'></textarea><div class=grid><div><label>类型</label><select name=mtype><option value=web>Web 网页</option><option value=rss>RSS</option></select></div><div><label>间隔秒数（最低 60）</label><input name=interval_seconds type=number min=60 value=60></div></div><h3>默认提醒条件</h3><div class=check-row><label><input type=checkbox name=keyword_match checked> 关键词命中</label><label><input type=checkbox name=new_item checked> 新条目</label><label><input type=checkbox name=price_change> 价格变化</label><label><input type=checkbox name=stock_change> 库存变化</label></div><div class=form-actions><button class='btn primary' type=submit>批量添加</button> <a class=btn href='/'>取消</a></div></form></div>"""
+        body = f"""<div class=card><h2>批量新增监控</h2><p class=muted>一行一个网站，格式：<code>名称|URL|关键词1,关键词2,关键词3</code>。</p><form method=post action='/monitor/bulk'><label>批量列表</label><textarea name=items style='min-height:260px' placeholder='{html_escape(sample)}'></textarea><div class=grid><div><label>类型</label><select name=mtype><option value=web>Web 网页</option><option value=rss>RSS</option></select></div><div><label>间隔秒数（最低 60）</label><input name=interval_seconds type=number min=60 value=60></div></div><h3>默认提醒条件</h3><div class=check-row><label><input type=checkbox name=keyword_match checked> 关键词命中</label><label><input type=checkbox name=new_item checked> 新条目</label><label><input type=checkbox name=price_change> 价格变化</label><label><input type=checkbox name=stock_change> 库存变化</label><label><input type=checkbox name=notify_telegram checked> 推送 Telegram</label><label><input type=checkbox name=notify_feishu checked> 推送飞书</label></div><div class=form-actions><button class='btn primary' type=submit>批量添加</button> <a class=btn href='/'>取消</a></div></form></div>"""
         return layout("批量新增", body)
 
     @app.post("/monitor/bulk")
-    async def bulk_monitor_save(_: str = Depends(panel_auth), items: str = Form(""), mtype: str = Form("web"), interval_seconds: int = Form(300), keyword_match: str | None = Form(None), new_item: str | None = Form(None), price_change: str | None = Form(None), stock_change: str | None = Form(None), notify_telegram: str | None = Form("on")):
+    async def bulk_monitor_save(_: str = Depends(panel_auth), items: str = Form(""), mtype: str = Form("web"), interval_seconds: int = Form(300), keyword_match: str | None = Form(None), new_item: str | None = Form(None), price_change: str | None = Form(None), stock_change: str | None = Form(None), notify_telegram: str | None = Form("on"), notify_feishu: str | None = Form("on")):
         cfg = cfg_load_fresh()
         monitors = cfg.setdefault("monitors", [])
         added = 0
@@ -2680,7 +2820,7 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
             name, url = parts[0], parts[1]
             keywords = parts[2] if len(parts) >= 3 else ""
             try:
-                monitors.append(monitor_from_form(None, name, mtype, url, interval_seconds, keywords.replace(',', '\n'), "article, .thread, .post, li", "h1, h2, h3, a", "a", "", "", bool(keyword_match), bool(new_item), bool(price_change), bool(stock_change), bool(notify_telegram)))
+                monitors.append(monitor_from_form(None, name, mtype, url, interval_seconds, keywords.replace(',', '\n'), "article, .thread, .post, li", "h1, h2, h3, a", "a", "", "", bool(keyword_match), bool(new_item), bool(price_change), bool(stock_change), bool(notify_telegram), bool(notify_feishu)))
                 added += 1
             except Exception as e:
                 errors.append(f"第 {line_no} 行失败：{html_escape(e)}")
@@ -2717,10 +2857,11 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
         price_change: str | None,
         stock_change: str | None,
         notify_telegram: str | None,
+        notify_feishu: str | None,
     ) -> RedirectResponse:
         cfg = cfg_load_fresh()
         monitors = cfg.setdefault("monitors", [])
-        m = monitor_from_form(original_index, name, mtype, url, interval_seconds, keywords, item_selector, title_selector, link_selector, price_selector, stock_selector, bool(keyword_match), bool(new_item), bool(price_change), bool(stock_change), bool(notify_telegram))
+        m = monitor_from_form(original_index, name, mtype, url, interval_seconds, keywords, item_selector, title_selector, link_selector, price_selector, stock_selector, bool(keyword_match), bool(new_item), bool(price_change), bool(stock_change), bool(notify_telegram), bool(notify_feishu))
         if original_index is None:
             monitors.append(m)
         else:
@@ -2733,12 +2874,12 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
         return RedirectResponse("/", status_code=303)
 
     @app.post("/monitor/create")
-    async def create_monitor(_: str = Depends(panel_auth), name: str = Form(...), mtype: str = Form(...), url: str = Form(...), interval_seconds: int = Form(300), keywords: str = Form(""), item_selector: str = Form(""), title_selector: str = Form(""), link_selector: str = Form(""), price_selector: str = Form(""), stock_selector: str = Form(""), keyword_match: str | None = Form(None), new_item: str | None = Form(None), price_change: str | None = Form(None), stock_change: str | None = Form(None), notify_telegram: str | None = Form(None)) -> RedirectResponse:
-        return await save_form_common(None, name, mtype, url, interval_seconds, keywords, item_selector, title_selector, link_selector, price_selector, stock_selector, keyword_match, new_item, price_change, stock_change, notify_telegram)
+    async def create_monitor(_: str = Depends(panel_auth), name: str = Form(...), mtype: str = Form(...), url: str = Form(...), interval_seconds: int = Form(300), keywords: str = Form(""), item_selector: str = Form(""), title_selector: str = Form(""), link_selector: str = Form(""), price_selector: str = Form(""), stock_selector: str = Form(""), keyword_match: str | None = Form(None), new_item: str | None = Form(None), price_change: str | None = Form(None), stock_change: str | None = Form(None), notify_telegram: str | None = Form(None), notify_feishu: str | None = Form(None)) -> RedirectResponse:
+        return await save_form_common(None, name, mtype, url, interval_seconds, keywords, item_selector, title_selector, link_selector, price_selector, stock_selector, keyword_match, new_item, price_change, stock_change, notify_telegram, notify_feishu)
 
     @app.post("/monitor/save")
-    async def save_monitor(_: str = Depends(panel_auth), original_index: int = Form(...), name: str = Form(...), mtype: str = Form(...), url: str = Form(...), interval_seconds: int = Form(300), keywords: str = Form(""), item_selector: str = Form(""), title_selector: str = Form(""), link_selector: str = Form(""), price_selector: str = Form(""), stock_selector: str = Form(""), keyword_match: str | None = Form(None), new_item: str | None = Form(None), price_change: str | None = Form(None), stock_change: str | None = Form(None), notify_telegram: str | None = Form(None)) -> RedirectResponse:
-        return await save_form_common(original_index, name, mtype, url, interval_seconds, keywords, item_selector, title_selector, link_selector, price_selector, stock_selector, keyword_match, new_item, price_change, stock_change, notify_telegram)
+    async def save_monitor(_: str = Depends(panel_auth), original_index: int = Form(...), name: str = Form(...), mtype: str = Form(...), url: str = Form(...), interval_seconds: int = Form(300), keywords: str = Form(""), item_selector: str = Form(""), title_selector: str = Form(""), link_selector: str = Form(""), price_selector: str = Form(""), stock_selector: str = Form(""), keyword_match: str | None = Form(None), new_item: str | None = Form(None), price_change: str | None = Form(None), stock_change: str | None = Form(None), notify_telegram: str | None = Form(None), notify_feishu: str | None = Form(None)) -> RedirectResponse:
+        return await save_form_common(original_index, name, mtype, url, interval_seconds, keywords, item_selector, title_selector, link_selector, price_selector, stock_selector, keyword_match, new_item, price_change, stock_change, notify_telegram, notify_feishu)
 
     @app.get("/monitor/{idx}/delete")
     async def delete_monitor(idx: int, _: str = Depends(panel_auth)) -> RedirectResponse:
@@ -2810,6 +2951,8 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
 <h3>TG 用户会话（可选）</h3><p class=muted>仅用于“TG 群监听 -> 监听来源=用户会话”，适合 Bot 无法加入的群。填写后需重启。</p>
 <div class=grid><div><label>TG_API_ID</label><input name=TG_API_ID value='{html_escape(v['TG_API_ID'])}' placeholder='例如 12345678'></div><div><label>TG_API_HASH</label><input name=TG_API_HASH value='{html_escape(v['TG_API_HASH'])}' placeholder='32位哈希'></div></div>
 <label>TG_API_SESSION</label><textarea name=TG_API_SESSION placeholder='Telethon StringSession'>{html_escape(v['TG_API_SESSION'])}</textarea>
+<h3>飞书自定义机器人（可选）</h3><p class=muted>填写 Webhook URL 后，所有 TG 推送通道（监控命中、群关键词、收件箱补发、管理员通知）会并行推送到飞书。Secret 为机器人“签名校验”所用，未启用可留空。</p>
+<div class=grid><div><label>FEISHU_WEBHOOK_URL</label><input name=FEISHU_WEBHOOK_URL value='{html_escape(v['FEISHU_WEBHOOK_URL'])}' placeholder='https://open.feishu.cn/open-apis/bot/v2/hook/xxxx'></div><div><label>FEISHU_WEBHOOK_SECRET</label><input name=FEISHU_WEBHOOK_SECRET value='{html_escape(v['FEISHU_WEBHOOK_SECRET'])}' placeholder='可选，启用签名校验时填写'></div></div>
 <div class=grid><div><label>日志级别</label><input name=LOG_LEVEL value='{html_escape(v['LOG_LEVEL'])}'></div><div><label>面板监听地址</label><input name=WEB_PANEL_HOST value='{html_escape(v['WEB_PANEL_HOST'])}'></div><div><label>面板端口</label><input name=WEB_PANEL_PORT value='{html_escape(v['WEB_PANEL_PORT'])}'></div><div><label>面板用户</label><input name=WEB_PANEL_USER value='{html_escape(v['WEB_PANEL_USER'])}'></div><div><label>面板密码</label><input name=WEB_PANEL_PASSWORD value='{html_escape(v['WEB_PANEL_PASSWORD'])}'></div></div>
 <h3>监控数据自动清理</h3><p class=muted>删除过期监控通知消息，并清理 RSS/网站监控状态和去重记录；不会删除用户、收件箱、双向对话消息。</p><div class=grid><div><label>清理间隔（分钟）</label><input name=CLEANUP_INTERVAL_MINUTES type=number min=1 value='{html_escape(cleanup.get("interval_minutes", 60))}'></div><div><label>监控通知删除时间（分钟）</label><input name=CLEANUP_MESSAGE_DELETE_AFTER_MINUTES type=number min=1 value='{html_escape(cleanup.get("monitor_message_delete_after_minutes", 60))}'></div><div><label>保留监控数据（分钟）</label><input name=CLEANUP_RETENTION_MINUTES type=number min=1 value='{html_escape(cleanup.get("monitor_retention_minutes", 1440))}'></div></div>
 <input type=hidden name=WEB_PANEL_ENABLED value='true'><div class=form-actions><button class='btn primary' type=submit>保存设置</button></div><small>改 Token、管理员 ID 或端口后需要重启。</small></form></div>"""
@@ -2832,7 +2975,7 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
         cfg_save(cfg)
 
     @app.post("/settings", response_class=HTMLResponse)
-    async def settings_save(_: str = Depends(panel_auth), TELEGRAM_BOT_TOKEN: str = Form(""), ADMIN_CHAT_ID: str = Form(""), TG_API_ID: str = Form(""), TG_API_HASH: str = Form(""), TG_API_SESSION: str = Form(""), LOG_LEVEL: str = Form("INFO"), WEB_PANEL_ENABLED: str = Form("true"), WEB_PANEL_HOST: str = Form("127.0.0.1"), WEB_PANEL_PORT: str = Form("8765"), WEB_PANEL_USER: str = Form("admin"), WEB_PANEL_PASSWORD: str = Form("admin"), CLEANUP_INTERVAL_MINUTES: int = Form(60), CLEANUP_MESSAGE_DELETE_AFTER_MINUTES: int = Form(60), CLEANUP_RETENTION_MINUTES: int = Form(1440)) -> str:
+    async def settings_save(_: str = Depends(panel_auth), TELEGRAM_BOT_TOKEN: str = Form(""), ADMIN_CHAT_ID: str = Form(""), TG_API_ID: str = Form(""), TG_API_HASH: str = Form(""), TG_API_SESSION: str = Form(""), FEISHU_WEBHOOK_URL: str = Form(""), FEISHU_WEBHOOK_SECRET: str = Form(""), LOG_LEVEL: str = Form("INFO"), WEB_PANEL_ENABLED: str = Form("true"), WEB_PANEL_HOST: str = Form("127.0.0.1"), WEB_PANEL_PORT: str = Form("8765"), WEB_PANEL_USER: str = Form("admin"), WEB_PANEL_PASSWORD: str = Form("admin"), CLEANUP_INTERVAL_MINUTES: int = Form(60), CLEANUP_MESSAGE_DELETE_AFTER_MINUTES: int = Form(60), CLEANUP_RETENTION_MINUTES: int = Form(1440)) -> str:
         save_panel_settings(locals() | {"WEB_PANEL_ENABLED": WEB_PANEL_ENABLED}, CLEANUP_INTERVAL_MINUTES, CLEANUP_MESSAGE_DELETE_AFTER_MINUTES, CLEANUP_RETENTION_MINUTES)
         return layout("已保存", "<div class=msg>已保存，不会自动重启；修改 Token/管理员 ID 后请重启。</div><p><a class=btn href='/settings'>返回</a> <a class=btn href='/restart'>重启机器人</a></p>")
 
@@ -2957,13 +3100,15 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
 <h3>TG 用户会话（可选）</h3><p class=muted>仅用于 TG 群监听来源=用户会话。修改后需重启。</p>
 <div class=grid><div><label>TG_API_ID</label><input name=TG_API_ID value='{html_escape(v['TG_API_ID'])}'></div><div><label>TG_API_HASH</label><input name=TG_API_HASH value='{html_escape(v['TG_API_HASH'])}'></div></div>
 <label>TG_API_SESSION</label><textarea name=TG_API_SESSION>{html_escape(v['TG_API_SESSION'])}</textarea>
+<h3>飞书机器人（可选）</h3><p class=muted>填写后所有 TG 推送通道会并行推送到飞书。</p>
+<div class=grid><div><label>FEISHU_WEBHOOK_URL</label><input name=FEISHU_WEBHOOK_URL value='{html_escape(v['FEISHU_WEBHOOK_URL'])}'></div><div><label>FEISHU_WEBHOOK_SECRET</label><input name=FEISHU_WEBHOOK_SECRET value='{html_escape(v['FEISHU_WEBHOOK_SECRET'])}'></div></div>
 <div class=grid><div><label>日志级别</label><input name=LOG_LEVEL value='{html_escape(v['LOG_LEVEL'])}'></div><div><label>面板监听地址</label><input name=WEB_PANEL_HOST value='{html_escape(v['WEB_PANEL_HOST'])}'></div><div><label>面板端口</label><input name=WEB_PANEL_PORT value='{html_escape(v['WEB_PANEL_PORT'])}'></div><div><label>面板用户</label><input name=WEB_PANEL_USER value='{html_escape(v['WEB_PANEL_USER'])}'></div><div><label>面板密码</label><input name=WEB_PANEL_PASSWORD value='{html_escape(v['WEB_PANEL_PASSWORD'])}'></div></div>
 <input type=hidden name=WEB_PANEL_ENABLED value='true'><div class=form-actions><button class='btn primary' type=submit>保存配置</button> <a class=btn href='/restart'>重启机器人</a></div></form></div>"""
         body = settings_card + "<div class=card><h2>用户管理</h2><table><tr><th>用户</th><th>状态</th><th>备注</th><th>操作</th></tr>" + "".join(trs) + "</table></div>"
         return layout("用户管理", body)
 
     @app.post("/users/settings", response_class=HTMLResponse)
-    async def users_settings_save(_: str = Depends(panel_auth), TELEGRAM_BOT_TOKEN: str = Form(""), ADMIN_CHAT_ID: str = Form(""), TG_API_ID: str = Form(""), TG_API_HASH: str = Form(""), TG_API_SESSION: str = Form(""), LOG_LEVEL: str = Form("INFO"), WEB_PANEL_ENABLED: str = Form("true"), WEB_PANEL_HOST: str = Form("127.0.0.1"), WEB_PANEL_PORT: str = Form("8765"), WEB_PANEL_USER: str = Form("admin"), WEB_PANEL_PASSWORD: str = Form("admin")) -> str:
+    async def users_settings_save(_: str = Depends(panel_auth), TELEGRAM_BOT_TOKEN: str = Form(""), ADMIN_CHAT_ID: str = Form(""), TG_API_ID: str = Form(""), TG_API_HASH: str = Form(""), TG_API_SESSION: str = Form(""), FEISHU_WEBHOOK_URL: str = Form(""), FEISHU_WEBHOOK_SECRET: str = Form(""), LOG_LEVEL: str = Form("INFO"), WEB_PANEL_ENABLED: str = Form("true"), WEB_PANEL_HOST: str = Form("127.0.0.1"), WEB_PANEL_PORT: str = Form("8765"), WEB_PANEL_USER: str = Form("admin"), WEB_PANEL_PASSWORD: str = Form("admin")) -> str:
         cleanup = (cfg_load_fresh().get("cleanup") or {})
         save_panel_settings(
             locals() | {"WEB_PANEL_ENABLED": WEB_PANEL_ENABLED},

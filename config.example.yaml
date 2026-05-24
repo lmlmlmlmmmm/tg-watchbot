@@ -34,6 +34,7 @@ monitors:
     price_change: false
     stock_change: false
   notify_telegram: true
+  notify_feishu: true
   forum: true
 - name: Linux.do 最新
   type: rss
@@ -52,6 +53,7 @@ monitors:
     price_change: false
     stock_change: false
   notify_telegram: true
+  notify_feishu: true
   forum: true
 group_monitors:
 - name: TG 群关键词监听示例
@@ -64,6 +66,7 @@ group_monitors:
   exclude_keywords:
   - 求带
   notify_telegram: true
+  notify_feishu: true
   summary_mode: template
   ai_base_url: ''
   ai_api_key: ''
