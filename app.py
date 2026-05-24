@@ -254,7 +254,7 @@ def html_escape(text: Any) -> str:
 
 
 def app_icon_data_uri() -> str:
-    svg = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%23f0f0f0'/><circle cx='22' cy='22' r='13' fill='%23d02020' stroke='%23121212' stroke-width='4'/><rect x='30' y='12' width='22' height='22' fill='%231040c0' stroke='%23121212' stroke-width='4'/><path d='M12 52 L30 30 L48 52 Z' fill='%23f0c020' stroke='%23121212' stroke-width='4'/></svg>"""
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%232563eb'/><path d='M32 16 L16 48 L48 48 Z' fill='white'/></svg>"""
     return "data:image/svg+xml," + svg
 
 
@@ -1002,10 +1002,11 @@ def list_monitor_runtime_status() -> dict[str, dict[str, Any]]:
 
 def get_monitor_status_badge(status: dict[str, Any] | None) -> str:
     if not status:
-        return "未运行"
+        return "<span class='badge'>未运行</span>"
     if int(status.get("consecutive_failures", 0)) > 0:
-        return f"异常 x{int(status.get('consecutive_failures', 0))}"
-    return "正常"
+        val = int(status.get("consecutive_failures", 0))
+        return f"<span class='badge danger'>异常 x{val}</span>"
+    return "<span class='badge ok'>正常</span>"
 
 
 def record_discovered_group_chat_data(chat_id: int, title: str, username: str = "") -> None:
@@ -2007,35 +2008,28 @@ def login_page(error: str = "") -> str:
 <title>登录 · tg-watchbot</title>
 <link rel=icon href="{app_icon_data_uri()}">
 <style>
-:root{{color-scheme:light;--canvas:#f0f0f0;--ink:#121212;--muted:#5c5c5c;--red:#d02020;--blue:#1040c0;--yellow:#f0c020;--white:#fff;--ease:cubic-bezier(.2,.8,.2,1)}}
+:root{{color-scheme:light;--canvas:#f6f8fb;--ink:#111827;--muted:#64748b;--line:#dbe3ef;--blue:#2563eb;--blue-dark:#1d4ed8;--red:#dc2626;--white:#fff;--ease:cubic-bezier(.2,.8,.2,1)}}
 *{{box-sizing:border-box}}
-body{{margin:0;min-height:100vh;font-family:Outfit,Aptos,'Segoe UI',sans-serif;background:var(--canvas);color:var(--ink);display:grid;place-items:center;padding:24px;overflow:hidden}}
-body:before{{content:"";position:fixed;inset:auto auto -90px -70px;width:220px;height:220px;border:4px solid var(--ink);border-radius:50%;background:var(--yellow);z-index:-1;animation:floatA 5.5s var(--ease) infinite alternate}}
-body:after{{content:"";position:fixed;top:54px;right:8vw;width:150px;height:150px;background:var(--blue);border:4px solid var(--ink);transform:rotate(12deg);z-index:-1;animation:floatB 6.5s var(--ease) infinite alternate}}
-.login-card{{position:relative;width:min(420px,100%);padding:32px;border:4px solid var(--ink);border-radius:0;background:var(--white);box-shadow:8px 8px 0 var(--ink);contain:paint;will-change:transform;animation:cardIn .28s var(--ease)}}
-.login-card:after{{content:"";position:absolute;right:22px;top:22px;width:24px;height:24px;background:var(--red);clip-path:polygon(50% 0,0 100%,100% 100%)}}
-.logo{{width:58px;height:58px;border:4px solid var(--ink);background:var(--white);position:relative;margin-bottom:22px;box-shadow:4px 4px 0 var(--ink);transition:transform .22s var(--ease);will-change:transform}}
-.logo:before{{content:"";position:absolute;left:8px;top:8px;width:18px;height:18px;border:3px solid var(--ink);border-radius:50%;background:var(--red)}}
-.logo:after{{content:"";position:absolute;right:7px;top:8px;width:18px;height:18px;border:3px solid var(--ink);background:var(--blue)}}
-.logo i{{position:absolute;left:13px;bottom:7px;width:30px;height:22px;background:var(--yellow);border:3px solid var(--ink);clip-path:polygon(50% 0,0 100%,100% 100%)}}
-.login-card:hover .logo{{transform:translateY(-1px)}}
-h1{{margin:0 0 8px;font-size:34px;line-height:.95;text-transform:uppercase;color:var(--ink);letter-spacing:0;font-weight:900}}
-p{{margin:0 0 24px;color:var(--muted);line-height:1.5;font-weight:500}}
-label{{display:block;margin:14px 0 7px;color:var(--ink);font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}}
-input{{width:100%;border:3px solid var(--ink);border-radius:0;background:#fff;color:var(--ink);padding:12px 13px;font-size:15px;outline:none;transition:transform .16s var(--ease),box-shadow .16s var(--ease);will-change:transform}}
-input:focus{{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--blue)}}
-button{{width:100%;margin-top:22px;border:3px solid var(--ink);border-radius:0;padding:12px 16px;background:var(--red);color:white;font-weight:900;font-size:14px;text-transform:uppercase;letter-spacing:.08em;cursor:pointer;box-shadow:4px 4px 0 var(--ink);transition:transform .16s var(--ease),background-color .16s var(--ease);will-change:transform}}
-button:hover{{transform:translate(-1px,-1px);background:#bc1c1c}}
-button:active{{transform:translate(2px,2px)}}
-.login-error{{background:#fff;border:3px solid var(--ink);color:var(--red);padding:10px 12px;margin-bottom:16px;font-weight:800;box-shadow:4px 4px 0 var(--red)}}
-.foot{{margin-top:18px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}}
-@keyframes cardIn{{from{{opacity:.0;transform:translateY(8px)}}to{{opacity:1;transform:none}}}}
-@keyframes floatA{{from{{transform:translateY(0)}}to{{transform:translateY(-8px)}}}}
-@keyframes floatB{{from{{transform:rotate(12deg) translateY(0)}}to{{transform:rotate(12deg) translateY(-9px)}}}}
+body{{margin:0;min-height:100vh;font-family:Aptos,'Segoe UI',sans-serif;background:var(--canvas);color:var(--ink);display:grid;place-items:center;padding:24px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}}
+.login-card{{width:min(400px,100%);padding:30px;border:1px solid var(--line);border-radius:8px;background:var(--white);box-shadow:0 18px 45px rgba(15,23,42,.08);animation:cardIn .22s var(--ease)}}
+.logo{{width:42px;height:42px;border-radius:8px;background:var(--blue);position:relative;margin-bottom:20px;box-shadow:0 10px 24px rgba(37,99,235,.2)}}
+.logo:before{{content:"";position:absolute;left:13px;top:9px;width:16px;height:22px;background:#fff;clip-path:polygon(50% 0,0 100%,100% 100%)}}
+.logo:after,.logo i{{display:none}}
+h1{{margin:0 0 8px;font-size:28px;line-height:1.12;color:var(--ink);letter-spacing:0;font-weight:750}}
+p{{margin:0 0 24px;color:var(--muted);line-height:1.6;font-weight:400}}
+label{{display:block;margin:14px 0 7px;color:#334155;font-size:13px;font-weight:650}}
+input{{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);padding:11px 12px;font-size:15px;outline:none;transition:border-color .16s var(--ease),box-shadow .16s var(--ease)}}
+input:focus{{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.14)}}
+button{{width:100%;margin-top:22px;border:0;border-radius:8px;padding:12px 16px;background:var(--blue);color:white;font-weight:700;font-size:14px;cursor:pointer;transition:background-color .16s var(--ease),box-shadow .16s var(--ease)}}
+button:hover{{background:var(--blue-dark);box-shadow:0 10px 22px rgba(37,99,235,.18)}}
+button:active{{background:#1e40af}}
+.login-error{{background:#fef2f2;border:1px solid #fecaca;color:var(--red);border-radius:8px;padding:10px 12px;margin-bottom:16px;font-weight:650}}
+.foot{{margin-top:18px;color:var(--muted);font-size:13px;text-align:center;font-weight:500}}
+@keyframes cardIn{{from{{opacity:.0;transform:translateY(6px)}}to{{opacity:1;transform:none}}}}
 @media (prefers-reduced-motion: reduce){{
   *,*::before,*::after{{animation:none!important;transition:none!important}}
 }}
-</style></head><body><main class=login-card><div class=logo><i></i></div><h1>tg-watchbot</h1><p>登录后管理 Telegram 机器人、关键词监控和提醒。</p>{err}<form method=post action=/login><label>用户名</label><input name=username autocomplete=username autofocus><label>密码</label><input name=password type=password autocomplete=current-password><button type=submit>登录面板</button></form><div class=foot>localhost panel</div></main></body></html>"""
+</style></head><body><main class=login-card><div class=logo><i></i></div><h1>tg-watchbot</h1><p>登录后管理 Telegram 机器人,关键词监控和提醒.</p>{err}<form method=post action=/login><label>用户名</label><input name=username autocomplete=username autofocus><label>密码</label><input name=password type=password autocomplete=current-password><button type=submit>登录面板</button></form><div class=foot>localhost panel</div></main></body></html>"""
 
 
 def env_values() -> dict[str, str]:
@@ -2298,88 +2292,80 @@ def layout(title: str, body: str) -> str:
 <title>{html_escape(title)} · tg-watchbot</title>
 <link rel=icon href="{app_icon_data_uri()}">
 <style>
-:root{{--canvas:#f0f0f0;--ink:#121212;--muted:#5c5c5c;--red:#d02020;--blue:#1040c0;--yellow:#f0c020;--white:#fff;--gray:#e0e0e0;--ease:cubic-bezier(.2,.8,.2,1)}}
+:root{{--canvas:#f6f8fb;--ink:#111827;--muted:#64748b;--line:#dbe3ef;--line-soft:#edf2f7;--blue:#2563eb;--blue-soft:#eff6ff;--red:#dc2626;--red-soft:#fef2f2;--green:#059669;--green-soft:#ecfdf5;--yellow:#f59e0b;--yellow-soft:#fffbeb;--white:#fff;--gray:#f1f5f9;--ease:cubic-bezier(.2,.8,.2,1)}}
 *{{box-sizing:border-box}}
-body{{font-family:Outfit,Aptos,'Segoe UI',sans-serif;background:var(--canvas);color:var(--ink);margin:0;letter-spacing:0;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}}
-body:before{{content:"";position:fixed;right:-70px;top:110px;width:190px;height:190px;border:4px solid var(--ink);border-radius:50%;background:var(--yellow);z-index:-1;animation:floatA 7s var(--ease) infinite alternate}}
-body:after{{content:"";position:fixed;left:190px;bottom:-80px;width:190px;height:190px;border:4px solid var(--ink);background:var(--blue);transform:rotate(45deg);z-index:-1;animation:floatB 8s var(--ease) infinite alternate}}
+body{{font-family:Aptos,'Segoe UI',sans-serif;background:var(--canvas);color:var(--ink);margin:0;letter-spacing:0;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}}
 a{{color:var(--ink);text-decoration:none}}
 a:hover{{text-decoration:underline}}
-.shell{{display:grid;grid-template-columns:254px minmax(0,1fr);min-height:100vh}}
-aside{{border-right:4px solid var(--ink);background:var(--white);padding:18px 14px;position:sticky;top:0;height:100vh;overflow:auto;overscroll-behavior:contain}}
-main{{padding:24px 30px;min-width:0;max-width:1440px;animation:mainIn .25s var(--ease)}}
-.brand{{display:flex;gap:10px;align-items:center;margin-bottom:18px;padding:0 4px 16px;border-bottom:4px solid var(--ink)}}
-.mark{{width:44px;height:44px;border:4px solid var(--ink);background:var(--white);position:relative;box-shadow:4px 4px 0 var(--ink);flex:0 0 auto;transition:transform .2s var(--ease);will-change:transform}}
-.mark:before{{content:"";position:absolute;left:5px;top:5px;width:13px;height:13px;border:3px solid var(--ink);border-radius:50%;background:var(--red)}}
-.mark:after{{content:"";position:absolute;right:4px;top:5px;width:13px;height:13px;border:3px solid var(--ink);background:var(--blue)}}
-.mark i{{position:absolute;left:8px;bottom:4px;width:25px;height:18px;background:var(--yellow);border:3px solid var(--ink);clip-path:polygon(50% 0,0 100%,100% 100%)}}
-.brand:hover .mark{{transform:translateY(-1px)}}
-.brand b{{font-size:18px;color:var(--ink);font-weight:900;text-transform:uppercase}}
-.brand small{{display:block;color:var(--muted);margin-top:2px;font-weight:700}}
-nav{{display:grid;gap:13px}}
-nav section{{display:grid;gap:6px;padding:9px;border:3px solid var(--ink);background:#fff;box-shadow:3px 3px 0 var(--ink);transition:transform .18s var(--ease);contain:paint}}
-nav section:hover{{transform:translateY(-1px)}}
-nav section>b{{display:inline-block;width:max-content;margin:-20px 0 2px -2px;padding:3px 8px;border:3px solid var(--ink);background:var(--yellow);font-size:12px;font-weight:900;text-transform:uppercase}}
-nav a{{position:relative;padding:9px 10px;border:3px solid var(--ink);background:var(--white);color:var(--ink);font-weight:900;text-transform:uppercase;font-size:12px;box-shadow:2px 2px 0 var(--ink);transition:transform .14s var(--ease),box-shadow .14s var(--ease),background-color .14s var(--ease);will-change:transform}}
-nav section:nth-child(2)>b{{background:var(--blue);color:white}}
-nav section:nth-child(3)>b{{background:var(--red);color:white}}
-nav section:nth-child(4)>b{{background:var(--gray)}}
-nav a:hover{{text-decoration:none;transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--ink)}}
-nav a:active{{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--ink)}}
-.logout{{background:var(--red)!important;color:white}}
-.top{{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px;border-bottom:4px solid var(--ink);padding-bottom:14px}}
-.top h1{{margin:0;font-size:34px;line-height:.95;color:var(--ink);font-weight:900;text-transform:uppercase}}
-.top .badge{{background:var(--blue);color:white}}
-.btn{{background:var(--white);color:var(--ink);padding:7px 11px;border:3px solid var(--ink);border-radius:0;display:inline-block;cursor:pointer;font-weight:900;line-height:1.35;text-transform:uppercase;font-size:12px;box-shadow:3px 3px 0 var(--ink);transition:transform .14s var(--ease),box-shadow .14s var(--ease),background-color .14s var(--ease);will-change:transform}}
-.btn:hover{{text-decoration:none;transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--ink)}}
-.btn:active{{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}}
-.btn.primary{{background:var(--red);color:white}}
-.btn.danger{{background:var(--red);color:white}}
-.btn.ok{{background:var(--yellow);color:var(--ink)}}
+.shell{{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100vh}}
+aside{{border-right:1px solid var(--line);background:var(--white);padding:20px 14px;position:sticky;top:0;height:100vh;overflow:auto;overscroll-behavior:contain}}
+main{{padding:26px 30px;min-width:0;max-width:1440px;animation:mainIn .22s var(--ease)}}
+.brand{{display:flex;gap:10px;align-items:center;margin-bottom:18px;padding:0 4px 18px;border-bottom:1px solid var(--line)}}
+.mark{{width:38px;height:38px;border-radius:8px;background:var(--blue);position:relative;flex:0 0 auto;box-shadow:0 8px 18px rgba(37,99,235,.18)}}
+.mark:before{{content:"";position:absolute;left:12px;top:8px;width:15px;height:22px;background:#fff;clip-path:polygon(50% 0,0 100%,100% 100%)}}
+.mark:after,.mark i{{display:none}}
+.brand b{{font-size:17px;color:var(--ink);font-weight:750}}
+.brand small{{display:block;color:var(--muted);margin-top:3px;font-size:12px;font-weight:500}}
+nav{{display:grid;gap:16px}}
+nav section{{display:grid;gap:4px}}
+nav section>b{{display:block;margin:0 0 5px;padding:0 8px;color:var(--muted);font-size:12px;font-weight:700}}
+nav a{{position:relative;padding:8px 10px;border-radius:7px;color:#334155;font-weight:600;font-size:13px;transition:background-color .14s var(--ease),color .14s var(--ease)}}
+nav a:hover{{text-decoration:none;background:var(--gray);color:var(--ink)}}
+.logout{{color:var(--red)!important}}
+.top{{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:16px}}
+.top h1{{margin:0;font-size:28px;line-height:1.18;color:var(--ink);font-weight:750}}
+.top .badge{{background:var(--blue-soft);color:var(--blue);border-color:#bfdbfe}}
+.btn{{background:var(--white);color:#334155;padding:7px 11px;border:1px solid var(--line);border-radius:7px;display:inline-block;cursor:pointer;font-weight:650;line-height:1.35;font-size:13px;transition:background-color .14s var(--ease),border-color .14s var(--ease),color .14s var(--ease),box-shadow .14s var(--ease)}}
+.btn:hover{{text-decoration:none;background:var(--gray);border-color:#cbd5e1;color:var(--ink)}}
+.btn:focus-visible{{outline:none;box-shadow:0 0 0 3px rgba(37,99,235,.16)}}
+.btn.primary{{background:var(--blue);border-color:var(--blue);color:white}}
+.btn.primary:hover{{background:#1d4ed8;border-color:#1d4ed8;color:white}}
+.btn.danger{{background:var(--red-soft);border-color:#fecaca;color:var(--red)}}
+.btn.danger:hover{{background:#fee2e2;border-color:#fca5a5;color:#b91c1c}}
+.btn.ok{{background:var(--green-soft);border-color:#bbf7d0;color:var(--green)}}
+.btn.ok:hover{{background:#dcfce7;border-color:#86efac;color:#047857}}
 .actions{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
-.card{{position:relative;background:var(--white);border:4px solid var(--ink);border-radius:0;padding:18px;margin:16px 0;box-shadow:8px 8px 0 var(--ink);transition:transform .2s var(--ease);contain:paint}}
-.card:hover{{transform:translateY(-1px)}}
-.card:after{{content:"";position:absolute;top:12px;right:12px;width:14px;height:14px;background:var(--red);border:3px solid var(--ink)}}
-.toolbar{{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;padding-right:34px}}
+.card{{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:18px;margin:16px 0;box-shadow:0 10px 28px rgba(15,23,42,.04);overflow:auto}}
+.toolbar{{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}}
 .form-actions{{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0 0}}
-h2,h3{{font-weight:900;text-transform:uppercase;letter-spacing:0}}
-h2{{font-size:24px}}
-h3{{font-size:16px;border-bottom:3px solid var(--ink);padding-bottom:6px;margin-top:20px}}
-input,select,textarea{{width:100%;box-sizing:border-box;background:#fff;color:var(--ink);border:3px solid var(--ink);border-radius:0;padding:10px 11px;outline:none;font-size:14px;font-weight:600;transition:transform .14s var(--ease),box-shadow .14s var(--ease);will-change:transform}}
-input:focus,select:focus,textarea:focus{{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--blue)}}
+h2,h3{{font-weight:750;letter-spacing:0;color:var(--ink)}}
+h2{{font-size:21px}}
+h3{{font-size:16px;border-bottom:1px solid var(--line);padding-bottom:7px;margin-top:22px}}
+input,select,textarea{{width:100%;box-sizing:border-box;background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:10px 11px;outline:none;font-size:14px;font-weight:500;transition:border-color .14s var(--ease),box-shadow .14s var(--ease)}}
+input:focus,select:focus,textarea:focus{{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.14)}}
 textarea{{min-height:116px;font-family:'Cascadia Mono',Consolas,monospace}}
-label{{display:block;margin:10px 0 5px;color:var(--ink);font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:.06em}}
+label{{display:block;margin:10px 0 5px;color:#334155;font-weight:650;font-size:13px}}
 .check-row{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
-.check-row label{{display:flex;gap:7px;align-items:center;margin:0;padding:8px 10px;border:3px solid var(--ink);background:var(--gray);transition:transform .14s var(--ease)}}
-.check-row label:hover{{transform:translateY(-1px)}}
+.check-row label{{display:flex;gap:7px;align-items:center;margin:0;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--gray)}}
 .check-row input{{width:auto}}
-small,.muted{{color:var(--muted);line-height:1.5;font-weight:600}}
-table{{width:100%;border-collapse:collapse;border:3px solid var(--ink);background:white}}
-td,th{{border:3px solid var(--ink);padding:10px;text-align:left;vertical-align:top}}
-th{{color:var(--ink);font-size:12px;background:var(--yellow);text-transform:uppercase;letter-spacing:.06em}}
-tr:nth-child(even) td{{background:#fafafa}}
-.badge{{padding:4px 8px;border:3px solid var(--ink);border-radius:999px;background:var(--blue);color:white;font-size:12px;font-weight:900;text-transform:uppercase}}
-.msg{{padding:11px 12px;border:3px solid var(--ink);background:var(--yellow);color:var(--ink);margin:10px 0;font-weight:900;box-shadow:4px 4px 0 var(--ink)}}
-pre{{white-space:pre-wrap;background:#121212;color:#fff;padding:13px;border:4px solid var(--ink);max-height:420px;overflow:auto;box-shadow:5px 5px 0 var(--yellow)}}
-.friend-links{{margin-top:18px;padding-top:12px;border-top:3px solid var(--ink);display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
-.friend-links b{{font-size:12px;font-weight:900;text-transform:uppercase}}
-.friend-links a{{font-weight:900}}
-@keyframes mainIn{{from{{opacity:.0;transform:translateY(8px)}}to{{opacity:1;transform:none}}}}
-@keyframes floatA{{from{{transform:translateY(0)}}to{{transform:translateY(-8px)}}}}
-@keyframes floatB{{from{{transform:rotate(45deg) translateY(0)}}to{{transform:rotate(45deg) translateY(-10px)}}}}
+small,.muted{{color:var(--muted);line-height:1.5;font-weight:500}}
+table{{width:100%;min-width:760px;border-collapse:separate;border-spacing:0;background:white;border:1px solid var(--line);border-radius:8px;overflow:hidden}}
+td,th{{border-bottom:1px solid var(--line-soft);padding:10px;text-align:left;vertical-align:top}}
+th{{color:#475569;font-size:12px;background:#f8fafc;font-weight:700}}
+tr:last-child td{{border-bottom:0}}
+tr:nth-child(even) td{{background:#fcfdff}}
+.badge{{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid #bfdbfe;border-radius:999px;background:var(--blue-soft);color:var(--blue);font-size:12px;font-weight:650;white-space:nowrap}}
+.badge.ok{{background:var(--green-soft);border-color:#bbf7d0;color:var(--green)}}
+.badge.danger{{background:var(--red-soft);border-color:#fecaca;color:var(--red)}}
+.msg{{padding:11px 12px;border:1px solid #fde68a;border-radius:8px;background:var(--yellow-soft);color:#92400e;margin:10px 0;font-weight:650}}
+pre{{white-space:pre-wrap;background:#0f172a;color:#e2e8f0;padding:13px;border:1px solid #1e293b;border-radius:8px;max-height:420px;overflow:auto}}
+.friend-links{{margin-top:18px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--muted)}}
+.friend-links b{{font-size:12px;font-weight:700}}
+.friend-links a{{font-weight:650;color:#334155}}
+@keyframes mainIn{{from{{opacity:.0;transform:translateY(6px)}}to{{opacity:1;transform:none}}}}
 @media(max-width:860px){{
   .shell{{grid-template-columns:1fr}}
-  aside{{position:relative;height:auto}}
+  aside{{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line)}}
   main{{padding:18px}}
   nav{{grid-template-columns:repeat(2,minmax(0,1fr))}}
   .top{{align-items:flex-start;flex-direction:column}}
-  .card{{box-shadow:5px 5px 0 var(--ink)}}
+  table{{min-width:680px}}
 }}
 @media (prefers-reduced-motion: reduce){{
   *,*::before,*::after{{animation:none!important;transition:none!important}}
 }}
-</style></head><body><div class=shell><aside><div class=brand><div class=mark><i></i></div><div><b>tg-watchbot</b><small>Telegram 自动化</small></div></div><nav><section><b>消息</b><a href='/inbox'>收件箱</a><a href='/users'>用户管理</a><a href='/send'>主动发消息</a><a href='/replies'>快捷回复</a><a href='/rules'>私聊广告拦截</a></section><section><b>监控</b><a href='/'>监控面板</a><a href='/monitor/new'>新增监控</a><a href='/group-monitors'>TG 群监听</a><a href='/monitor/events'>推送历史</a><a href='/run-once'>手动检查</a></section><section><b>配置</b><a href='/settings'>Bot / 面板设置</a><a href='/yaml'>YAML 高级编辑</a><a href='/config/export'>导出配置</a></section><section><b>系统</b><a href='/update'>更新代码</a><a href='/logs'>运行日志</a><a href='/restart' onclick='return confirm("确定重启机器人服务？")'>重启机器人</a><a class=logout href='/logout'>退出登录</a></section></nav></aside><main><div class=top><h1>{html_escape(title)}</h1><span class=badge>WatchBot Panel</span></div>
+</style></head><body><div class=shell><aside><div class=brand><div class=mark><i></i></div><div><b>tg-watchbot</b><small>Telegram 自动化</small></div></div><nav><section><b>消息</b><a href='/inbox'>收件箱</a><a href='/users'>用户管理</a><a href='/send'>主动发消息</a><a href='/replies'>快捷回复</a><a href='/rules'>私聊广告拦截</a></section><section><b>监控</b><a href='/'>监控面板</a><a href='/monitor/new'>新增监控</a><a href='/group-monitors'>TG 群监听</a><a href='/monitor/events'>推送历史</a><a href='/run-once'>手动检查</a></section><section><b>配置</b><a href='/settings'>Bot / 面板设置</a><a href='/yaml'>YAML 高级编辑</a><a href='/config/export'>导出配置</a></section><section><b>系统</b><a href='/update'>更新代码</a><a href='/logs'>运行日志</a><a href='/restart' onclick='return confirm("确定重启机器人服务?")'>重启机器人</a><a class=logout href='/logout'>退出登录</a></section></nav></aside><main><div class=top><h1>{html_escape(title)}</h1><span class=badge>WatchBot Panel</span></div>
 {body}<div class=friend-links><b>友链</b><a href='https://linux.do' target='_blank' rel='noopener noreferrer'>Linux.do</a><span>·</span><a href='https://www.nodeseek.com' target='_blank' rel='noopener noreferrer'>NodeSeek</a></div></main></div></body></html>"""
 
 
@@ -2393,24 +2379,24 @@ def monitor_form_html(m: dict[str, Any] | None = None, idx: int | None = None) -
     def checked(k: str) -> str:
         return "checked" if no.get(k, False) else ""
     return f"""<form method=post action='{action}' class=card>{hidden}
-<div class=grid><div><label>名称</label><input name=name value='{html_escape(m.get('name',''))}' required></div>
-<div><label>类型</label><select name=mtype><option value=web {'selected' if m.get('type')=='web' else ''}>Web 网页</option><option value=rss {'selected' if m.get('type')=='rss' else ''}>RSS</option></select></div>
-<div><label>URL</label><input name=url value='{html_escape(m.get('url',''))}' required></div>
-<div><label>间隔秒数（最低 60）</label><input name=interval_seconds type=number min=60 value='{html_escape(m.get('interval_seconds',60))}'></div></div>
-<label>关键词（一行一个）</label><textarea name=keywords>{html_escape(keywords)}</textarea>
-<h3>Web 选择器（RSS 可忽略）</h3><div class=grid>
-<div><label>条目选择器</label><input name=item_selector value='{html_escape(selectors.get('item','article, .thread, .post, li'))}'></div>
-<div><label>标题选择器</label><input name=title_selector value='{html_escape(selectors.get('title','h1, h2, h3, a'))}'></div>
-<div><label>链接选择器</label><input name=link_selector value='{html_escape(selectors.get('link','a'))}'></div>
-<div><label>价格选择器</label><input name=price_selector value='{html_escape(selectors.get('price',''))}'></div>
-<div><label>库存选择器</label><input name=stock_selector value='{html_escape(selectors.get('stock',''))}'></div></div>
+<div class=grid><div><label>名称</label><input name=name value='{html_escape(m.get("name",""))}' required></div>
+<div><label>类型</label><select name=mtype><option value=web {'selected' if m.get("type")=='web' else ''}>Web 网页</option><option value=rss {'selected' if m.get("type")=='rss' else ''}>RSS</option></select></div>
+<div><label>URL</label><input name=url value='{html_escape(m.get("url",""))}' required></div>
+<div><label>间隔秒数(最低 60)</label><input name=interval_seconds type=number min=60 value='{html_escape(m.get("interval_seconds",60))}'></div></div>
+<label>关键词(一行一个)</label><textarea name=keywords>{html_escape(keywords)}</textarea>
+<h3>Web 选择器(RSS 可忽略)</h3><div class=grid>
+<div><label>条目选择器</label><input name=item_selector value='{html_escape(selectors.get("item","article, .thread, .post, li"))}'></div>
+<div><label>标题选择器</label><input name=title_selector value='{html_escape(selectors.get("title","h1, h2, h3, a"))}'></div>
+<div><label>链接选择器</label><input name=link_selector value='{html_escape(selectors.get("link","a"))}'></div>
+<div><label>价格选择器</label><input name=price_selector value='{html_escape(selectors.get("price",""))}'></div>
+<div><label>库存选择器</label><input name=stock_selector value='{html_escape(selectors.get("stock",""))}'></div></div>
 <h3>提醒条件</h3>
 <div class=check-row><label><input type=checkbox name=keyword_match {checked('keyword_match')}> 关键词命中</label>
 <label><input type=checkbox name=new_item {checked('new_item')}> 新条目</label>
 <label><input type=checkbox name=price_change {checked('price_change')}> 价格变化</label>
 <label><input type=checkbox name=stock_change {checked('stock_change')}> 库存变化</label>
-<label><input type=checkbox name=notify_telegram {'checked' if m.get('notify_telegram', True) else ''}> 推送 Telegram</label>
-<label><input type=checkbox name=notify_feishu {'checked' if m.get('notify_feishu', True) else ''}> 推送飞书</label></div>
+<label><input type=checkbox name=notify_telegram {'checked' if m.get("notify_telegram", True) else ''}> 推送 Telegram</label>
+<label><input type=checkbox name=notify_feishu {'checked' if m.get("notify_feishu", True) else ''}> 推送飞书</label></div>
 <div class=form-actions><button class='btn primary' type=submit>保存</button> <a class=btn href='/'>取消</a></div></form>"""
 
 
@@ -2438,21 +2424,21 @@ def group_monitor_form_html(m: dict[str, Any] | None = None, idx: int | None = N
     keywords = "\n".join(m.get("keywords") or [])
     exclude_keywords = "\n".join(m.get("exclude_keywords") or [])
     return f"""<form method=post action='{action}' class=card>{hidden}
-<div class=check-row><label><input type=checkbox name=enabled {'checked' if m.get('enabled', True) else ''}> 启用监听</label>
-<label><input type=checkbox name=notify_telegram {'checked' if m.get('notify_telegram', True) else ''}> 推送管理员</label>
-<label><input type=checkbox name=notify_feishu {'checked' if m.get('notify_feishu', True) else ''}> 推送飞书</label></div>
-<div class=grid><div><label>监听名称</label><input name=name value='{html_escape(m.get('name',''))}' placeholder='例如：业务群关键词'></div>
-<div><label>群 chat_id</label><input name=chat_id value='{html_escape(m.get('chat_id',''))}' placeholder='例如 -1001234567890' required></div></div>
-<div class=grid><div><label>监听来源</label><select name=listen_source><option value=bot {'selected' if str(m.get('listen_source', 'bot')) == 'bot' else ''}>Bot</option><option value=user_session {'selected' if str(m.get('listen_source')) == 'user_session' else ''}>用户会话</option></select></div><div><label>来源说明</label><input value='Bot 需要被拉进群；用户会话适合 Bot 拉不进去的群' readonly></div></div>
-<div class=grid><div><label>总结模式</label><select name=summary_mode><option value=template {'selected' if str(m.get('summary_mode', 'template')) == 'template' else ''}>模板</option><option value=ai {'selected' if str(m.get('summary_mode')) == 'ai' else ''}>AI</option></select></div><div><label>AI 接口</label><select name=ai_interface><option value=responses {'selected' if str(m.get('ai_interface', 'responses')) == 'responses' else ''}>Responses</option><option value=chat {'selected' if str(m.get('ai_interface')) == 'chat' else ''}>Chat Completions</option></select></div></div>
-<div class=grid><div><label>AI Base URL</label><input name=ai_base_url value='{html_escape(m.get('ai_base_url',''))}' placeholder='https://api.example.com/v1'></div><div><label>AI Model</label><input name=ai_model value='{html_escape(m.get('ai_model','gpt-4o-mini'))}' placeholder='gpt-4o-mini'></div></div>
-<div class=grid><div><label>AI API Key</label><input name=ai_api_key value='{html_escape(m.get('ai_api_key',''))}' placeholder='sk-...'></div><div><label>AI Temperature</label><input name=ai_temperature type=number step=0.1 min=0 max=2 value='{html_escape(m.get('ai_temperature',0.2))}'></div></div>
-<p class=muted style='margin:0'>监听来源选“用户会话”时，需要在“Bot / 面板设置”填写 TG_API_ID、TG_API_HASH、TG_API_SESSION，并重启。</p>
-<div class=grid><div><label>AI 超时（秒）</label><input name=ai_timeout_seconds type=number min=1 value='{html_escape(m.get('ai_timeout_seconds',30))}'></div><div><label>最小推送间隔（秒）</label><input name=ai_min_interval_seconds type=number min=0 value='{html_escape(m.get('ai_min_interval_seconds',DEFAULT_GROUP_AI_MIN_INTERVAL_SECONDS))}'></div></div>
-<div class=grid><div><label>摘要去重窗口（秒）</label><input name=ai_dedupe_window_seconds type=number min=0 value='{html_escape(m.get('ai_dedupe_window_seconds',DEFAULT_GROUP_AI_DEDUPE_WINDOW_SECONDS))}'></div><div></div></div>
-<label>AI 总结提示词（可选）</label><textarea name=ai_prompt placeholder='留空则使用默认总结提示词'>{html_escape(m.get('ai_prompt',''))}</textarea>
-<label>关键词（一行一个）</label><textarea name=keywords>{html_escape(keywords)}</textarea>
-<label>排除词（一行一个）</label><textarea name=exclude_keywords>{html_escape(exclude_keywords)}</textarea>
+<div class=check-row><label><input type=checkbox name=enabled {'checked' if m.get("enabled", True) else ''}> 启用监听</label>
+<label><input type=checkbox name=notify_telegram {'checked' if m.get("notify_telegram", True) else ''}> 推送管理员</label>
+<label><input type=checkbox name=notify_feishu {'checked' if m.get("notify_feishu", True) else ''}> 推送飞书</label></div>
+<div class=grid><div><label>监听名称</label><input name=name value='{html_escape(m.get("name",""))}' placeholder='例如:业务群关键词'></div>
+<div><label>群 chat_id</label><input name=chat_id value='{html_escape(m.get("chat_id",""))}' placeholder='例如 -1001234567890' required></div></div>
+<div class=grid><div><label>监听来源</label><select name=listen_source><option value=bot {'selected' if str(m.get("listen_source", "bot")) == 'bot' else ''}>Bot</option><option value=user_session {'selected' if str(m.get("listen_source")) == 'user_session' else ''}>用户会话</option></select></div><div><label>来源说明</label><input value='Bot 需要被拉进群;用户会话适合 Bot 拉不进去的群' readonly></div></div>
+<div class=grid><div><label>总结模式</label><select name=summary_mode><option value=template {'selected' if str(m.get("summary_mode", "template")) == 'template' else ''}>模板</option><option value=ai {'selected' if str(m.get("summary_mode")) == 'ai' else ''}>AI</option></select></div><div><label>AI 接口</label><select name=ai_interface><option value=responses {'selected' if str(m.get("ai_interface", "responses")) == 'responses' else ''}>Responses</option><option value=chat {'selected' if str(m.get("ai_interface")) == 'chat' else ''}>Chat Completions</option></select></div></div>
+<div class=grid><div><label>AI Base URL</label><input name=ai_base_url value='{html_escape(m.get("ai_base_url",""))}' placeholder='https://api.example.com/v1'></div><div><label>AI Model</label><input name=ai_model value='{html_escape(m.get("ai_model","gpt-4o-mini"))}' placeholder='gpt-4o-mini'></div></div>
+<div class=grid><div><label>AI API Key</label><input name=ai_api_key value='{html_escape(m.get("ai_api_key",""))}' placeholder='sk-...'></div><div><label>AI Temperature</label><input name=ai_temperature type=number step=0.1 min=0 max=2 value='{html_escape(m.get("ai_temperature",0.2))}'></div></div>
+<p class=muted style='margin:0'>监听来源选"用户会话"时,需要在"Bot / 面板设置"填写 TG_API_ID,TG_API_HASH,TG_API_SESSION,并重启.</p>
+<div class=grid><div><label>AI 超时(秒)</label><input name=ai_timeout_seconds type=number min=1 value='{html_escape(m.get("ai_timeout_seconds",30))}'></div><div><label>最小推送间隔(秒)</label><input name=ai_min_interval_seconds type=number min=0 value='{html_escape(m.get("ai_min_interval_seconds",DEFAULT_GROUP_AI_MIN_INTERVAL_SECONDS))}'></div></div>
+<div class=grid><div><label>摘要去重窗口(秒)</label><input name=ai_dedupe_window_seconds type=number min=0 value='{html_escape(m.get("ai_dedupe_window_seconds",DEFAULT_GROUP_AI_DEDUPE_WINDOW_SECONDS))}'></div><div></div></div>
+<label>AI 总结提示词(可选)</label><textarea name=ai_prompt placeholder='留空则使用默认总结提示词'>{html_escape(m.get("ai_prompt",""))}</textarea>
+<label>关键词(一行一个)</label><textarea name=keywords>{html_escape(keywords)}</textarea>
+<label>排除词(一行一个)</label><textarea name=exclude_keywords>{html_escape(exclude_keywords)}</textarea>
 <div class=form-actions><button class='btn primary' type=submit>保存</button> <a class=btn href='/group-monitors'>返回列表</a></div></form>"""
 
 
@@ -2511,7 +2497,7 @@ def create_panel_app() -> FastAPI:
                 )
                 if st.get("last_error"):
                     st_line += f"<br><small>{html_escape(str(st.get('last_error'))[:100])}</small>"
-            rows.append(f"""<tr><td><span class=badge>{html_escape(m.get('type','web'))}</span></td><td><b>{html_escape(name)}</b><br><small>{html_escape(m.get('url',''))}</small></td><td>{html_escape(m.get('interval_seconds',60))}s<br><small>{tg}</small></td><td>{html_escape(', '.join(m.get('keywords') or []))}</td><td>{st_line}</td><td><a class=btn href='/monitor/{i}/edit'>编辑</a> <a class='btn ok' href='/monitor/{i}/preview'>预览</a> <a class='btn ok' href='/monitor/{i}/run'>检查</a> <a class='btn danger' href='/monitor/{i}/delete' onclick='return confirm("确定删除？")'>删除</a></td></tr>""")
+            rows.append(f"""<tr><td><span class=badge>{html_escape(m.get("type","web"))}</span></td><td><b>{html_escape(name)}</b><br><small>{html_escape(m.get("url",""))}</small></td><td>{html_escape(m.get("interval_seconds",60))}s<br><small>{tg}</small></td><td>{html_escape(', '.join(m.get("keywords") or []))}</td><td>{st_line}</td><td><a class=btn href='/monitor/{i}/edit'>编辑</a> <a class='btn ok' href='/monitor/{i}/preview'>预览</a> <a class='btn ok' href='/monitor/{i}/run'>检查</a> <a class='btn danger' href='/monitor/{i}/delete' onclick='return confirm("确定删除？")'>删除</a></td></tr>""")
         body = f"""<div class=card><div class=toolbar><div><h2 style='margin:0 0 6px'>监控目标</h2><p class=muted style='margin:0'>当前 {len(cfg.get('monitors') or [])} 个；保存后自动重载定时任务。</p></div><div class=actions><a class='btn' href='/monitor/templates'>论坛模板</a> <a class='btn primary' href='/monitor/new'>新增监控</a> <a class='btn ok' href='/monitor/bulk'>批量新增</a></div></div><table style='margin-top:16px'><tr><th>类型</th><th>目标</th><th>间隔/通知</th><th>关键词</th><th>运行状态</th><th>操作</th></tr>""" + "".join(rows) + "</table></div>"
         return layout("监控", body)
 
@@ -2539,7 +2525,7 @@ def create_panel_app() -> FastAPI:
             kws = ", ".join([str(x) for x in (gm.get("keywords") or [])]) or "-"
             exs = ", ".join([str(x) for x in (gm.get("exclude_keywords") or [])]) or "-"
             trs.append(
-                f"""<tr><td>{i+1}</td><td><b>{html_escape(gm.get('name') or gm.get('chat_id') or '-')}</b><br><small>{html_escape(gm.get('chat_id') or '-')}</small></td><td>{enabled}<br><small>{notify} · {source}</small></td><td>{html_escape(kws)}</td><td>{html_escape(exs)}</td><td><a class=btn href='/group-monitors/{i}/edit'>编辑</a> <a class='btn danger' href='/group-monitors/{i}/delete' onclick='return confirm("确定删除？")'>删除</a></td></tr>"""
+                f"""<tr><td>{i+1}</td><td><b>{html_escape(gm.get("name") or gm.get("chat_id") or '-')}</b><br><small>{html_escape(gm.get("chat_id") or '-')}</small></td><td>{enabled}<br><small>{notify} · {source}</small></td><td>{html_escape(kws)}</td><td>{html_escape(exs)}</td><td><a class=btn href='/group-monitors/{i}/edit'>编辑</a> <a class='btn danger' href='/group-monitors/{i}/delete' onclick='return confirm("确定删除？")'>删除</a></td></tr>"""
             )
         discovered_rows = []
         for row in discovered:
@@ -2906,7 +2892,7 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
             for it in items[:15]:
                 blocked, br = item_blocked(it, m)
                 hits = keyword_hits(f"{it.title} {it.text}", m.get("keywords") or [])
-                rows.append(f"""<tr><td>{html_escape(it.title)}<br><small>{html_escape(it.link)}</small></td><td>{html_escape(it.author or '-')}</td><td>{html_escape(it.category or '-')}</td><td>{html_escape(', '.join(hits) or '-')}</td><td>{'跳过: '+html_escape(br) if blocked else '可推送/记录'}</td></tr>""")
+                rows.append(f"""<tr><td>{html_escape(it.title)}<br><small><a href='{html_escape(it.link)}' target='_blank' rel='noopener noreferrer' style='color:var(--blue);text-decoration:underline'>{html_escape(it.link)}</a></small></td><td>{html_escape(it.author or '-')}</td><td>{html_escape(it.category or '-')}</td><td>{html_escape(', '.join(hits) or '-')}</td><td>{'跳过: '+html_escape(br) if blocked else '可推送/记录'}</td></tr>""")
             body_html = "<div class=card><h2>抓取预览</h2><p class=muted>只预览最近 15 条，不写入去重状态、不推送。</p><table><tr><th>标题/链接</th><th>作者</th><th>分类</th><th>命中</th><th>状态</th></tr>" + "".join(rows) + "</table></div>"
             return layout("抓取预览", body_html)
         except Exception as e:
@@ -3145,7 +3131,7 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
         spam = (cfg.get("bot") or {}).get("spam_filter") or {}
         keywords = "\n".join(spam.get("keywords") or [])
         body = f"""<div class=card><h2>私聊广告拦截</h2><p class=muted>只拦截用户私聊 Bot 的双向对话消息，不影响 RSS/Web 监控关键词。监控内容过滤请使用监控配置里的屏蔽词。</p><form method=post>
-<div class=check-row><label><input type=checkbox name=enabled {'checked' if spam.get('enabled') else ''}> 启用</label><label><input type=checkbox name=auto_block {'checked' if spam.get('auto_block', True) else ''}> 命中后自动拉黑</label></div>
+<div class=check-row><label><input type=checkbox name=enabled {'checked' if spam.get("enabled") else ''}> 启用</label><label><input type=checkbox name=auto_block {'checked' if spam.get("auto_block", True) else ''}> 命中后自动拉黑</label></div>
 <label>广告关键词（一行一个）</label><textarea name=keywords>{html_escape(keywords)}</textarea>
 <div class=form-actions><button class='btn primary' type=submit>保存规则</button></div></form></div>"""
         return layout("拦截规则", body)
