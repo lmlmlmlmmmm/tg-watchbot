@@ -2680,7 +2680,7 @@ def create_panel_app() -> FastAPI:
         cfg_save(cfg)
         return RedirectResponse("/group-monitors", status_code=303)
 
-    @app.post("/group-monitors/create")
+    @app.post("/group-monitors/create", response_model=None)
     async def group_monitor_create(
         _: str = Depends(panel_auth),
         name: str = Form(""),
@@ -2724,7 +2724,7 @@ def create_panel_app() -> FastAPI:
             ai_dedupe_window_seconds,
         )
 
-    @app.post("/group-monitors/save")
+    @app.post("/group-monitors/save", response_model=None)
     async def group_monitor_save(
         _: str = Depends(panel_auth),
         original_index: int = Form(...),
