@@ -2944,7 +2944,13 @@ HostLoc|https://hostloc.com|VPS,补货,优惠"""
         v = env_values()
         cleanup = (cfg_load_fresh().get("cleanup") or {})
         bot_ready = bool(v["TELEGRAM_BOT_TOKEN"].strip() and v["ADMIN_CHAT_ID"].strip())
-        status = "" if bot_ready else "<div class=msg>未填写 Token 或管理员 ID；网页可用，但 Bot 和监控推送不可用。</div>"
+        fs_ready = bool(v["FEISHU_WEBHOOK_URL"].strip())
+        if bot_ready:
+            status = ""
+        elif fs_ready:
+            status = "<div class=msg>未配置 Telegram，但已配置飞书 Webhook，将以“仅监控 + 飞书推送”模式运行。</div>"
+        else:
+            status = "<div class=msg>未填写 Telegram 配置且未填写飞书 Webhook；面板可用，但监控通知无处推送。</div>"
         body = f"""<h2>Bot / 面板设置</h2>{status}<div class=card><form method=post>
 <label>Telegram Bot Token</label><input name=TELEGRAM_BOT_TOKEN value='{html_escape(v['TELEGRAM_BOT_TOKEN'])}' placeholder='123456:ABC...'>
 <label>管理员 ADMIN_CHAT_ID（最多 3 个，用逗号分隔）</label><input name=ADMIN_CHAT_ID value='{html_escape(v['ADMIN_CHAT_ID'])}'>
@@ -3381,17 +3387,22 @@ async def main_async(run_once: bool = False, panel_only: bool = False) -> None:
             await bot.session.close()
         return
     await start_panel_server()
-    if not bot_env_configured():
+    tg_ready = bot_env_configured()
+    fs_ready = feishu_configured()
+    if not tg_ready and not fs_ready:
         logger.warning(
-            "Telegram bot is not configured. Web panel is available, but Telegram polling, monitor notifications, and admin/user messaging will not work until TELEGRAM_BOT_TOKEN and ADMIN_CHAT_ID are saved, then the service is restarted."
+            "Neither Telegram nor Feishu is configured. Web panel is available, but monitors will not push anywhere until at least one channel is configured, then the service is restarted."
         )
         while True:
             await asyncio.sleep(3600)
-    token, admin_chat_id = validate_env()
-    admin_chat_ids = parse_admin_chat_ids(os.getenv("ADMIN_CHAT_ID", ""))
-    bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
-    dp.include_router(router)
+    if tg_ready:
+        token, admin_chat_id = validate_env()
+        admin_chat_ids = parse_admin_chat_ids(os.getenv("ADMIN_CHAT_ID", ""))
+        bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        dp = Dispatcher()
+        dp.include_router(router)
+    else:
+        logger.warning("Telegram is not configured; running in monitor-only mode (Feishu push only).")
     scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
     scheduler_ref = scheduler
     schedule_monitors(scheduler)
@@ -3407,9 +3418,18 @@ async def main_async(run_once: bool = False, panel_only: bool = False) -> None:
             )
         else:
             user_session_listener_task = asyncio.create_task(run_user_session_group_listener())
-    await admin_send(f"tg-watchbot 已启动\n时间：{now_iso()}")
-    logger.info("bot polling start")
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    if tg_ready:
+        await admin_send(f"tg-watchbot 已启动\n时间：{now_iso()}")
+        logger.info("bot polling start")
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    else:
+        await admin_send(
+            f"tg-watchbot 已启动（仅监控+飞书模式）\n时间：{now_iso()}",
+            notify_telegram=False,
+        )
+        logger.info("monitor-only mode running; no TG polling")
+        while True:
+            await asyncio.sleep(3600)
 
 
 def main() -> None:
