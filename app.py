@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import calendar
 import hashlib
 import hmac
 import html
@@ -24,7 +25,7 @@ import sqlite3
 import time
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -64,6 +65,7 @@ MIN_INTERVAL_SECONDS = 60
 DEFAULT_MONITOR_MESSAGE_DELETE_AFTER_MINUTES = 60
 DEFAULT_GROUP_AI_MIN_INTERVAL_SECONDS = 30
 DEFAULT_GROUP_AI_DEDUPE_WINDOW_SECONDS = 300
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 DEFAULT_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -1644,6 +1646,19 @@ def canonical_forum_key(link: str, entry_id: str = "") -> str:
     return stable_key(link or entry_id)
 
 
+def format_feed_published_time(entry: Any) -> str:
+    """将 RSS/Atom 发布时间统一转换为北京时间，解析失败时保留源站原始字符串。"""
+    raw = getattr(entry, "published", "") or getattr(entry, "updated", "")
+    parsed = getattr(entry, "published_parsed", None) or getattr(entry, "updated_parsed", None)
+    if not parsed:
+        return raw
+    try:
+        dt = datetime.fromtimestamp(calendar.timegm(parsed), timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return raw
+    return dt.astimezone(BEIJING_TZ).isoformat(timespec="seconds")
+
+
 def parse_rss_items(monitor: dict[str, Any], body: str) -> list[MonitorItem]:
     feed = feedparser.parse(body)
     items: list[MonitorItem] = []
@@ -1652,7 +1667,7 @@ def parse_rss_items(monitor: dict[str, Any], body: str) -> list[MonitorItem]:
         link = getattr(e, "link", monitor.get("url", ""))
         summary = getattr(e, "summary", "")
         content = " ".join([c.get("value", "") for c in getattr(e, "content", []) if isinstance(c, dict)])
-        published = getattr(e, "published", "") or getattr(e, "updated", "")
+        published = format_feed_published_time(e)
         author = getattr(e, "author", "") or getattr(e, "dc_creator", "")
         category = ""
         tags = getattr(e, "tags", None) or []
